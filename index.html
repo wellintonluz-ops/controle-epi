@@ -171,6 +171,7 @@ select.fc{cursor:pointer}
   <div class="ni" onclick="goPage('aquisicao',this)"><span class="ni-ic">🛒</span>Sugestões de Compra</div>
   <div class="ni" onclick="openMov('Entrada')"><span class="ni-ic">⬆️</span>Registrar Entrada</div>
   <div class="ni" onclick="openMov('Saída')"><span class="ni-ic">⬇️</span>Registrar Saída</div>
+  <div class="ni" onclick="openCaConfig()"><span class="ni-ic">⚙️</span>Configurar Busca de CA</div>
   <div class="sb-foot">Ano 2025 · TBX · v3.0</div>
 </nav>
 
@@ -1173,6 +1174,7 @@ async function buscarCA() {
   const caNum = document.getElementById('en-ca').value.trim();
   const status = document.getElementById('ca-status');
   const btn = document.getElementById('ca-buscar-btn');
+  const linkFallback = (num) => '<a href="https://consultaca.com/'+num+'" target="_blank" style="color:var(--bl);font-weight:700">Abrir CA '+num+' no ConsultaCA →</a>';
 
   if(!caNum || caNum.toUpperCase()==='N.A.' || caNum==='') {
     status.innerHTML = '<span style="color:var(--rd)">⚠️ Informe o número do CA antes de buscar.</span>';
@@ -1183,12 +1185,18 @@ async function buscarCA() {
     return;
   }
 
-  // Detect if running from local file system (file://) — fetch() to external
-  // APIs is blocked by the browser in this mode, regardless of destination.
+  const proxyUrl = getCaProxyUrl();
+  if(!proxyUrl) {
+    status.innerHTML = '<span style="color:var(--rd)">⚙️ Busca automática não configurada. '
+      + '<a href="#" onclick="openCaConfig();return false;" style="color:var(--bl);font-weight:700">Configurar agora</a> '
+      + 'ou ' + linkFallback(caNum) + '</span>';
+    return;
+  }
+
   if(window.location.protocol === 'file:') {
     status.innerHTML = '<span style="color:var(--rd)">⚠️ A busca automática não funciona quando o arquivo é aberto diretamente '
-      + '(file://). Abra o sistema através de um servidor local ou hospedagem (http/https) para usar a busca automática. '
-      + '<a href="https://consultaca.com/'+caNum+'" target="_blank" style="color:var(--bl);font-weight:700">Abrir CA '+caNum+' no ConsultaCA →</a></span>';
+      + '(file://). Hospede o sistema em um servidor (http/https), como GitHub Pages. '
+      + linkFallback(caNum) + '</span>';
     return;
   }
 
@@ -1198,48 +1206,15 @@ async function buscarCA() {
   document.getElementById('ca-preview').style.display = 'none';
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: `Você é um assistente que busca informações de Certificados de Aprovação (CA) de EPIs no site consultaca.com.
-Acesse https://consultaca.com/${caNum} e extraia EXATAMENTE estas informações em JSON puro (sem markdown, sem blocos de código):
-{
-  "ca": "número do CA",
-  "nome_epi": "nome do EPI em maiúsculas (ex: CAPUZ OU BALACLAVA)",
-  "descricao": "descrição completa do equipamento",
-  "aprovado_para": "texto de aprovação/proteção",
-  "fabricante": "Razão Social do fabricante com CNPJ entre parênteses",
-  "situacao": "VÁLIDO ou VENCIDO ou CANCELADO",
-  "validade": "data no formato YYYY-MM-DD ou null se não tiver",
-  "restricao": "restrições de uso ou vazio",
-  "observacao": "observações ou vazio"
-}
-Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
-        messages: [{ role: 'user', content: `Busque as informações do CA número ${caNum} no site consultaca.com/${caNum} e retorne em JSON.` }]
-      })
-    });
+    const sep = proxyUrl.includes('?') ? '&' : '?';
+    const response = await fetch(proxyUrl + sep + 'ca=' + caNum);
+    const info = await response.json().catch(()=>null);
 
-    if(!response.ok) {
-      throw new Error('http_'+response.status);
+    if(!response.ok || !info) {
+      throw new Error((info && info.error) || ('http_'+response.status));
     }
-
-    const data = await response.json();
-    if(data.error) throw new Error(data.error.message || 'Erro da API');
-
-    let texto = '';
-    for(const block of (data.content||[])) {
-      if(block.type==='text') texto += block.text;
-    }
-
-    const jsonMatch = texto.match(/\{[\s\S]*\}/);
-    if(!jsonMatch) throw new Error('Resposta inesperada da API');
-    const info = JSON.parse(jsonMatch[0]);
-
-    if(!info.ca && !info.nome_epi) throw new Error('nao_encontrado');
+    if(info.error) throw new Error(info.error);
+    if(!info.nome_epi && !info.fabricante) throw new Error('nao_encontrado');
 
     if(info.nome_epi && !document.getElementById('en-nome').value.trim()) {
       document.getElementById('en-nome').value = info.nome_epi;
@@ -1266,14 +1241,13 @@ Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
   } catch(err) {
     console.error('Erro CA lookup:', err);
     const msg = (err && err.message) || 'Erro desconhecido';
-    const linkFallback = '<a href="https://consultaca.com/'+caNum+'" target="_blank" style="color:var(--bl);font-weight:700">Abrir CA '+caNum+' no ConsultaCA →</a>';
 
     if(msg === 'nao_encontrado') {
-      status.innerHTML = '<span style="color:var(--rd)">❌ CA '+caNum+' não encontrado na base CAEPI. '+linkFallback+'</span>';
+      status.innerHTML = '<span style="color:var(--rd)">❌ CA '+caNum+' não encontrado na base CAEPI. '+linkFallback(caNum)+'</span>';
     } else if(msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('http_')) {
-      status.innerHTML = '<span style="color:var(--rd)">❌ Não foi possível conectar à busca automática (conexão bloqueada ou indisponível). '+linkFallback+'</span>';
+      status.innerHTML = '<span style="color:var(--rd)">❌ Não foi possível conectar ao serviço de busca (verifique a URL configurada). '+linkFallback(caNum)+'</span>';
     } else {
-      status.innerHTML = '<span style="color:var(--rd)">❌ Erro ao buscar: '+esc(msg)+'. '+linkFallback+'</span>';
+      status.innerHTML = '<span style="color:var(--rd)">❌ '+esc(msg)+'. '+linkFallback(caNum)+'</span>';
     }
   } finally {
     btn.disabled = false;
@@ -1281,16 +1255,47 @@ Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
   }
 }
 
+// ===== CONFIGURAÇÃO DO PROXY DE BUSCA DE CA =====
+const CA_PROXY_STORAGE_KEY = 'epi_ca_proxy_url';
+// Defina aqui a URL do seu Worker se preferir fixar no código (opcional):
+const CA_PROXY_URL_DEFAULT = 'https://epi-ca-proxy.wellinton-luz.workers.dev';
+
+function getCaProxyUrl() {
+  try {
+    const saved = localStorage.getItem(CA_PROXY_STORAGE_KEY);
+    if(saved) return saved.trim();
+  } catch(e) {}
+  return CA_PROXY_URL_DEFAULT;
+}
+
+function setCaProxyUrl(url) {
+  try { localStorage.setItem(CA_PROXY_STORAGE_KEY, url.trim()); } catch(e) {}
+}
+
+function openCaConfig() {
+  const current = getCaProxyUrl();
+  const url = prompt(
+    'Cole aqui a URL do seu Cloudflare Worker para habilitar a busca automática de CA.\n\n' +
+    'Exemplo: https://epi-ca-proxy.seunome.workers.dev\n\n' +
+    'Veja o passo a passo no arquivo COMO_ATIVAR_BUSCA_CA.md incluído no sistema.',
+    current || 'https://'
+  );
+  if(url === null) return;
+  setCaProxyUrl(url);
+  toast(url ? '✅ URL do proxy de CA salva!' : 'URL removida', url ? 'ok' : '');
+}
+
+
 // ===== INIT =====
 document.getElementById('nb-loans').textContent = LOANS.length;
 document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
 renderDash();
 
-// Warn if running from local file system — affects CA auto-lookup feature
-if(window.location.protocol === 'file:') {
+// Informa se a busca automática de CA ainda não foi configurada
+if(!getCaProxyUrl()) {
   const banner = document.createElement('div');
-  banner.style.cssText = 'background:#fef3c7;border-bottom:1px solid #fcd34d;color:#92400e;padding:9px 24px;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px';
-  banner.innerHTML = '<span>⚠️ Arquivo aberto localmente — a busca automática de CA (🔍 Buscar CA) não funciona neste modo. Hospede o arquivo em um servidor (http/https) para habilitar essa função, ou use o link manual no ConsultaCA.</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#92400e;flex-shrink:0">×</button>';
+  banner.style.cssText = 'background:#eff6ff;border-bottom:1px solid #bfdbfe;color:#1d4ed8;padding:9px 24px;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px';
+  banner.innerHTML = '<span>💡 Busca automática de CA ainda não configurada. <a href="#" onclick="openCaConfig();return false;" style="color:#1d4ed8;text-decoration:underline">Configurar agora</a> (veja o arquivo COMO_ATIVAR_BUSCA_CA.md para o passo a passo).</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#1d4ed8;flex-shrink:0">×</button>';
   document.querySelector('.main').insertBefore(banner, document.querySelector('.topbar'));
 }
 </script>
