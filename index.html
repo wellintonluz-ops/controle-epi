@@ -1171,21 +1171,31 @@ function onCaInput() {
 
 async function buscarCA() {
   const caNum = document.getElementById('en-ca').value.trim();
-  if(!caNum || caNum.toUpperCase()==='N.A.' || caNum==='' ) {
-    document.getElementById('ca-status').innerHTML = '<span style="color:var(--rd)">⚠️ Informe o número do CA antes de buscar.</span>';
+  const status = document.getElementById('ca-status');
+  const btn = document.getElementById('ca-buscar-btn');
+
+  if(!caNum || caNum.toUpperCase()==='N.A.' || caNum==='') {
+    status.innerHTML = '<span style="color:var(--rd)">⚠️ Informe o número do CA antes de buscar.</span>';
     return;
   }
   if(!/^\d+$/.test(caNum)) {
-    document.getElementById('ca-status').innerHTML = '<span style="color:var(--rd)">⚠️ CA deve conter apenas números.</span>';
+    status.innerHTML = '<span style="color:var(--rd)">⚠️ CA deve conter apenas números.</span>';
     return;
   }
 
-  const btn = document.getElementById('ca-buscar-btn');
-  const status = document.getElementById('ca-status');
+  // Detect if running from local file system (file://) — fetch() to external
+  // APIs is blocked by the browser in this mode, regardless of destination.
+  if(window.location.protocol === 'file:') {
+    status.innerHTML = '<span style="color:var(--rd)">⚠️ A busca automática não funciona quando o arquivo é aberto diretamente '
+      + '(file://). Abra o sistema através de um servidor local ou hospedagem (http/https) para usar a busca automática. '
+      + '<a href="https://consultaca.com/'+caNum+'" target="_blank" style="color:var(--bl);font-weight:700">Abrir CA '+caNum+' no ConsultaCA →</a></span>';
+    return;
+  }
+
   btn.disabled = true;
   btn.textContent = '⏳ Buscando...';
   status.innerHTML = '<span style="color:var(--g5)">Consultando base do CAEPI, aguarde...</span>';
-  document.getElementById('ca-preview').style.display='none';
+  document.getElementById('ca-preview').style.display = 'none';
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1213,23 +1223,24 @@ Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
       })
     });
 
+    if(!response.ok) {
+      throw new Error('http_'+response.status);
+    }
+
     const data = await response.json();
     if(data.error) throw new Error(data.error.message || 'Erro da API');
 
-    // Extract text from response
     let texto = '';
     for(const block of (data.content||[])) {
       if(block.type==='text') texto += block.text;
     }
 
-    // Parse JSON from response
     const jsonMatch = texto.match(/\{[\s\S]*\}/);
     if(!jsonMatch) throw new Error('Resposta inesperada da API');
     const info = JSON.parse(jsonMatch[0]);
 
-    if(!info.ca && !info.nome_epi) throw new Error('CA não encontrado');
+    if(!info.ca && !info.nome_epi) throw new Error('nao_encontrado');
 
-    // Fill in the form fields
     if(info.nome_epi && !document.getElementById('en-nome').value.trim()) {
       document.getElementById('en-nome').value = info.nome_epi;
     }
@@ -1239,32 +1250,30 @@ Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
     if(info.fabricante) document.getElementById('en-fab').value = info.fabricante;
     if(info.validade) document.getElementById('en-prazo').value = info.validade;
     if(info.restricao) {
-      const obs = document.getElementById('en-obs');
-      if(!obs.value) obs.value = info.restricao;
+      const obsEl = document.getElementById('en-obs');
+      if(!obsEl.value) obsEl.value = info.restricao;
     }
 
-    // Show preview
     const sitCor = info.situacao==='VÁLIDO' ? '#15803d' : '#dc2626';
-    document.getElementById('cap-sit').innerHTML = '<span style="color:'+sitCor+'">'+( info.situacao||'-')+'</span>';
+    document.getElementById('cap-sit').innerHTML = '<span style="color:'+sitCor+'">'+(info.situacao||'-')+'</span>';
     document.getElementById('cap-val').textContent = info.validade ? info.validade.split('-').reverse().join('/') : '—';
     document.getElementById('cap-tipo').textContent = info.nome_epi||'-';
     document.getElementById('cap-fab').textContent = (info.fabricante||'-').replace(/\s*\(.*\)$/,'');
-    document.getElementById('ca-preview').style.display='block';
+    document.getElementById('ca-preview').style.display = 'block';
 
     status.innerHTML = '<span style="color:var(--gn)">✅ Informações preenchidas! Verifique a aba "Certificado CA".</span>';
 
-    // Switch to CA tab if not already there
-    const caTab = document.querySelector('#m-epi .tab:nth-child(2)');
-    const geralTab = document.querySelector('#m-epi .tab:nth-child(1)');
-    // Keep on geral tab so user sees the name field filled, but notify
-
   } catch(err) {
     console.error('Erro CA lookup:', err);
-    const msg = err.message || 'Erro desconhecido';
-    if(msg.includes('não encontrado') || msg.includes('404')) {
-      status.innerHTML = '<span style="color:var(--rd)">❌ CA '+caNum+' não encontrado na base CAEPI.</span>';
+    const msg = (err && err.message) || 'Erro desconhecido';
+    const linkFallback = '<a href="https://consultaca.com/'+caNum+'" target="_blank" style="color:var(--bl);font-weight:700">Abrir CA '+caNum+' no ConsultaCA →</a>';
+
+    if(msg === 'nao_encontrado') {
+      status.innerHTML = '<span style="color:var(--rd)">❌ CA '+caNum+' não encontrado na base CAEPI. '+linkFallback+'</span>';
+    } else if(msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('http_')) {
+      status.innerHTML = '<span style="color:var(--rd)">❌ Não foi possível conectar à busca automática (conexão bloqueada ou indisponível). '+linkFallback+'</span>';
     } else {
-      status.innerHTML = '<span style="color:var(--rd)">❌ Erro ao buscar: '+msg+'. <a href="https://consultaca.com/'+caNum+'" target="_blank" style="color:var(--bl)">Abrir no ConsultaCA →</a></span>';
+      status.innerHTML = '<span style="color:var(--rd)">❌ Erro ao buscar: '+esc(msg)+'. '+linkFallback+'</span>';
     }
   } finally {
     btn.disabled = false;
@@ -1276,6 +1285,14 @@ Responda SOMENTE com o JSON, sem explicação, sem markdown.`,
 document.getElementById('nb-loans').textContent = LOANS.length;
 document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
 renderDash();
+
+// Warn if running from local file system — affects CA auto-lookup feature
+if(window.location.protocol === 'file:') {
+  const banner = document.createElement('div');
+  banner.style.cssText = 'background:#fef3c7;border-bottom:1px solid #fcd34d;color:#92400e;padding:9px 24px;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px';
+  banner.innerHTML = '<span>⚠️ Arquivo aberto localmente — a busca automática de CA (🔍 Buscar CA) não funciona neste modo. Hospede o arquivo em um servidor (http/https) para habilitar essa função, ou use o link manual no ConsultaCA.</span><button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;font-size:16px;color:#92400e;flex-shrink:0">×</button>';
+  document.querySelector('.main').insertBefore(banner, document.querySelector('.topbar'));
+}
 </script>
 </body>
 </html>
