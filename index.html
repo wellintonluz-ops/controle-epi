@@ -130,6 +130,10 @@ select.fc{cursor:pointer}
 .prb{width:90px;height:6px;background:var(--g2);border-radius:3px;overflow:hidden;flex-shrink:0}
 .prf{height:100%;border-radius:3px;background:var(--y)}
 .prn{font-size:12px;font-weight:700;min-width:24px;text-align:right}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{padding:6px 14px;border-radius:100px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid var(--g3);background:var(--wh);color:var(--g6);transition:all .15s;white-space:nowrap;user-select:none}
+.pill:hover{border-color:var(--y);color:var(--y)}
+.pill.active{background:var(--y);color:#fff;border-color:var(--y)}
 .tabs{display:flex;border-bottom:2px solid var(--g2);margin-bottom:18px}
 .tab{padding:10px 18px;font-size:13px;font-weight:600;color:var(--g5);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
 .tab:hover{color:var(--g9)}
@@ -145,7 +149,7 @@ select.fc{cursor:pointer}
 .strip-lbl{font-size:10px;font-weight:700;color:var(--g5);text-transform:uppercase;letter-spacing:.04em}
 .strip-val{font-size:13px;font-weight:700;color:var(--g9)}
 @media print{
-  .sidebar,.topbar,.tb-actions,.tda,.mo,.toast-w,.ch .ctools,.ch .btn{display:none!important}
+  .sidebar,.topbar,.tb-actions,.tda,.mo,.toast-w,.ch .ctools,.ch .btn,.no-print,#ficha-periodo-bar{display:none!important}
   .main{margin-left:0}
   .content{padding:0}
 }
@@ -338,9 +342,22 @@ select.fc{cursor:pointer}
         <div class="ch">
           <div><div class="ct">Ficha de Controle e Entrega de EPI</div><div class="csub">Selecione o funcionário para visualizar</div></div>
           <div class="ctools">
-            <select class="fc" id="ficha-sel" onchange="renderFicha()" style="width:290px"><option value="">Selecione o funcionário...</option></select>
+            <select class="fc" id="ficha-sel" onchange="renderFicha()" style="width:260px"><option value="">Selecione o funcionário...</option></select>
             <button class="btn bs bsm" onclick="window.print()">🖨️ Imprimir</button>
           </div>
+        </div>
+        <div id="ficha-periodo-bar" style="display:none;padding:14px 22px;border-bottom:1px solid var(--g2);background:var(--g0)">
+          <div style="font-size:11px;font-weight:700;color:var(--g6);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📅 Período da requisição</div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div class="pills" id="ficha-pills"></div>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+              <input class="fc" type="date" id="ficha-data-ini" onchange="onFichaDataManual()" style="width:140px;padding:6px 9px;font-size:12px">
+              <span style="color:var(--g4);font-size:12px">até</span>
+              <input class="fc" type="date" id="ficha-data-fim" onchange="onFichaDataManual()" style="width:140px;padding:6px 9px;font-size:12px">
+              <button class="btn bs bxs" onclick="limparFiltroFicha()" title="Limpar período">✕ Limpar</button>
+            </div>
+          </div>
+          <div id="ficha-periodo-info" style="font-size:11px;color:var(--g5);margin-top:10px"></div>
         </div>
         <div id="ficha-body" style="padding:20px 22px">
           <div class="empty"><div class="ei">📄</div><div class="et">Selecione um funcionário para visualizar a ficha</div></div>
@@ -512,7 +529,24 @@ select.fc{cursor:pointer}
   </div>
 </div>
 
+<!-- CARD: CONFIRMAR IMPRESSÃO DA FICHA APÓS RETIRADA -->
+<div class="mo" id="m-print-confirm">
+  <div class="md" style="max-width:420px">
+    <div class="mb" style="text-align:center;padding-top:28px">
+      <div style="font-size:42px;margin-bottom:12px">✅</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:6px">Retirada registrada!</div>
+      <div style="font-size:13px;color:var(--g6);margin-bottom:4px" id="pc-resumo"></div>
+      <div style="font-size:13px;color:var(--g6);margin-bottom:20px">Deseja imprimir a ficha de controle de EPI deste funcionário agora?</div>
+    </div>
+    <div class="mf" style="justify-content:center;padding-bottom:24px">
+      <button class="btn bs" onclick="closeM('m-print-confirm')">Não, obrigado</button>
+      <button class="btn bp" onclick="confirmarImpressaoFicha()">🖨️ Sim, imprimir ficha</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast-w" id="toasts"></div>
+
 
 <script>
 // ===== DADOS =====
@@ -989,19 +1023,110 @@ function setupFicha() {
   if(sel.children.length<=1) {
     FUNCS.forEach(f=>{ const o=document.createElement('option'); o.value=f.matricula; o.textContent=f.nome+' ('+f.matricula+')'; sel.appendChild(o); });
   }
+  const pillsEl = document.getElementById('ficha-pills');
+  if(pillsEl && pillsEl.children.length===0) {
+    const opts = [
+      ['hoje','Hoje'], ['7d','Últimos 7 dias'], ['30d','Últimos 30 dias'],
+      ['mes','Este mês'], ['tudo','Todo o histórico'],
+    ];
+    pillsEl.innerHTML = opts.map(([k,lb],i)=>'<span class="pill'+(i===opts.length-1?' active':'')+'" data-periodo="'+k+'" onclick="setFichaPeriodo(\''+k+'\',this)">'+lb+'</span>').join('');
+  }
+}
+
+let fichaPeriodo = { ini: null, fim: null };
+let empisOrdemDesc = true;
+
+function toggleEmpisOrdem() {
+  empisOrdemDesc = !empisOrdemDesc;
+  renderFicha();
+}
+
+function setFichaPeriodo(key, el) {
+  document.querySelectorAll('#ficha-pills .pill').forEach(p=>p.classList.remove('active'));
+  if(el) el.classList.add('active');
+
+  const hoje = new Date();
+  const fmt = (d) => d.toISOString().slice(0,10);
+  let ini = null, fim = null;
+
+  if(key==='hoje') {
+    ini = fim = fmt(hoje);
+  } else if(key==='7d') {
+    const d = new Date(hoje); d.setDate(d.getDate()-6);
+    ini = fmt(d); fim = fmt(hoje);
+  } else if(key==='30d') {
+    const d = new Date(hoje); d.setDate(d.getDate()-29);
+    ini = fmt(d); fim = fmt(hoje);
+  } else if(key==='mes') {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    ini = fmt(d); fim = fmt(hoje);
+  } else { // tudo
+    ini = null; fim = null;
+  }
+
+  fichaPeriodo = { ini, fim };
+  document.getElementById('ficha-data-ini').value = ini||'';
+  document.getElementById('ficha-data-fim').value = fim||'';
+  renderFicha();
+}
+
+function onFichaDataManual() {
+  document.querySelectorAll('#ficha-pills .pill').forEach(p=>p.classList.remove('active'));
+  const ini = document.getElementById('ficha-data-ini').value || null;
+  const fim = document.getElementById('ficha-data-fim').value || null;
+  fichaPeriodo = { ini, fim };
+  renderFicha();
+}
+
+function limparFiltroFicha() {
+  fichaPeriodo = { ini: null, fim: null };
+  document.getElementById('ficha-data-ini').value = '';
+  document.getElementById('ficha-data-fim').value = '';
+  document.querySelectorAll('#ficha-pills .pill').forEach((p,i,arr)=>p.classList.toggle('active', i===arr.length-1));
+  renderFicha();
+}
+
+function dataNoPeriodo(dataStr) {
+  if(!fichaPeriodo.ini && !fichaPeriodo.fim) return true;
+  if(!dataStr) return false;
+  const d = dataStr.slice(0,10);
+  if(fichaPeriodo.ini && d < fichaPeriodo.ini) return false;
+  if(fichaPeriodo.fim && d > fichaPeriodo.fim) return false;
+  return true;
 }
 
 function renderFicha() {
   const mat = parseInt(document.getElementById('ficha-sel').value);
-  if(!mat){ document.getElementById('ficha-body').innerHTML='<div class="empty"><div class="ei">📄</div><div class="et">Selecione um funcionário</div></div>'; return; }
+  const periodoBar = document.getElementById('ficha-periodo-bar');
+  if(!mat){
+    periodoBar.style.display = 'none';
+    document.getElementById('ficha-body').innerHTML='<div class="empty"><div class="ei">📄</div><div class="et">Selecione um funcionário</div></div>';
+    return;
+  }
+  periodoBar.style.display = 'block';
   const fn = FUNCS.find(f=>f.matricula===mat);
   if(!fn) return;
-  const empis = LOANS.filter(l=>l.matricula===mat);
-  const hist  = MOVIMS.filter(m=>m.matricula===mat).reverse();
+
+  const empisAll = LOANS.filter(l=>l.matricula===mat);
+  const histAll  = MOVIMS.filter(m=>m.matricula===mat).reverse();
+  const hist     = histAll.filter(m=>dataNoPeriodo(m.data));
+  // "EPIs em uso" reflete sempre a situação atual (não filtra por período — é o saldo de hoje)
+  const empis = empisAll;
+
+  const temFiltro = !!(fichaPeriodo.ini || fichaPeriodo.fim);
+  let periodoTexto = 'Exibindo todo o histórico de movimentações.';
+  if(temFiltro) {
+    const iniTxt = fichaPeriodo.ini ? fd(fichaPeriodo.ini) : '—';
+    const fimTxt = fichaPeriodo.fim ? fd(fichaPeriodo.fim) : '—';
+    periodoTexto = 'Exibindo movimentações de '+iniTxt+' até '+fimTxt+' — '+hist.length+' registro(s) no período (de '+histAll.length+' no total).';
+  }
+  document.getElementById('ficha-periodo-info').textContent = periodoTexto;
+
   document.getElementById('ficha-body').innerHTML =
     '<div style="background:var(--g9);color:#fff;padding:20px;border-radius:var(--rl);margin-bottom:18px">'
     +'<div style="font-size:18px;font-weight:800;margin-bottom:4px">Ficha de Controle e Entrega de EPI</div>'
     +'<div style="font-size:12px;opacity:.6">Equipamento de Proteção Individual — TBX Indústria Importação e Comércio Ltda.</div>'
+    +(temFiltro ? '<div style="font-size:11px;opacity:.8;margin-top:8px;background:rgba(255,255,255,.1);display:inline-block;padding:4px 10px;border-radius:100px">📅 Período: '+(fichaPeriodo.ini?fd(fichaPeriodo.ini):'início')+' até '+(fichaPeriodo.fim?fd(fichaPeriodo.fim):'hoje')+'</div>' : '')
     +'</div>'
     +'<div class="detail-grid">'
     +'<div><div class="dl">Funcionário</div><div class="dv"><strong>'+esc(fn.nome)+'</strong></div></div>'
@@ -1009,29 +1134,35 @@ function renderFicha() {
     +'<div><div class="dl">Cargo</div><div class="dv">'+esc(fn.cargo)+'</div></div>'
     +'<div><div class="dl">Departamento</div><div class="dv"><span class="dept-tag">'+esc(fn.dept)+'</span></div></div>'
     +'<div><div class="dl">Admissão</div><div class="dv">'+fd(fn.admissao)+'</div></div>'
-    +'<div><div class="dl">EPIs em uso</div><div class="dv"><strong style="color:var(--or)">'+empis.length+'</strong> itens</div></div>'
+    +'<div class="no-print"><div class="dl">EPIs em uso (atual)</div><div class="dv"><strong style="color:var(--or)">'+empis.length+'</strong> itens</div></div>'
     +'</div>'
     +'<div style="font-size:12px;color:var(--g6);background:var(--g0);border:1px solid var(--g2);border-radius:var(--r);padding:12px 14px;margin-bottom:18px;line-height:1.7">'
     +'Declaro ter recebido da empresa TBX Indústria Importação e Comércio Ltda. os materiais relacionados nesta ficha para o meu uso como medida de proteção individual, comprometendo-me a usá-los e devolvê-los por ocasião de trocas ou desligamento da empresa, indenizando-a por dolo ou uso indevido, conforme NR-6 e CLT art. 158.'
     +'</div>'
     +(empis.length>0
-      ? '<div style="font-size:13px;font-weight:700;margin-bottom:10px">EPIs Atualmente com o Funcionário ('+empis.length+')</div>'
-        +'<table style="margin-bottom:18px"><thead><tr><th>EPI</th><th>CA</th><th>Qtd</th><th>Última Retirada</th></tr></thead><tbody>'
-        +empis.map(l=>'<tr><td>'+esc(l.epi)+'</td><td>'+caLink(l.ca)+'</td><td><strong>'+l.qtd+'</strong></td><td>'+fd(l.data)+'</td></tr>').join('')
+      ? '<div class="no-print">'
+        +'<div style="font-size:13px;font-weight:700;margin-bottom:10px">EPIs Atualmente com o Funcionário ('+empis.length+')</div>'
+        +'<table style="margin-bottom:18px"><thead><tr><th>EPI</th><th>CA</th><th>Qtd</th><th style="cursor:pointer;user-select:none" onclick="toggleEmpisOrdem()" title="Clique para inverter a ordem">Última Retirada '+(empisOrdemDesc?'▼':'▲')+'</th></tr></thead><tbody>'
+        +[...empis].sort((a,b)=> empisOrdemDesc ? (b.data||'').localeCompare(a.data||'') : (a.data||'').localeCompare(b.data||'')).map(l=>'<tr><td>'+esc(l.epi)+'</td><td>'+caLink(l.ca)+'</td><td><strong>'+l.qtd+'</strong></td><td>'+fd(l.data)+'</td></tr>').join('')
         +'</tbody></table>'
+        +'</div>'
       : '')
-    +'<div style="font-size:13px;font-weight:700;margin-bottom:10px">Histórico de Movimentações ('+hist.length+' registros)</div>'
-    +'<table><thead><tr><th>Data/Hora</th><th>Tipo</th><th>EPI</th><th>CA</th><th>Qtd</th><th>Obs</th></tr></thead><tbody>'
-    +hist.slice(0,50).map(m=>'<tr>'
-      +'<td style="font-size:11px;white-space:nowrap">'+fdt(m.data)+'</td>'
-      +'<td>'+bdgIO(m.io)+' '+bdgT(m.tipo)+'</td>'
-      +'<td style="font-size:12px">'+esc(m.epi)+'</td>'
-      +'<td>'+caLink(m.ca)+'</td>'
-      +'<td><strong>'+ab(m.qtd)+'</strong></td>'
-      +'<td style="font-size:11px;color:var(--g5)">'+esc(m.obs||'-')+'</td>'
-      +'</tr>').join('')
-    +'</tbody></table>'
-    +(hist.length>50?'<div style="text-align:center;padding:10px;font-size:12px;color:var(--g4)">... e mais '+(hist.length-50)+' registros</div>':'')
+    +'<div style="font-size:13px;font-weight:700;margin-bottom:10px">'
+      +(temFiltro ? 'Movimentações no Período Selecionado ('+hist.length+' registros)' : 'Histórico de Movimentações ('+hist.length+' registros)')
+    +'</div>'
+    +(hist.length===0
+      ? '<div class="empty" style="padding:24px"><div class="ei">📭</div><div class="et">Nenhuma movimentação no período selecionado</div></div>'
+      : '<table><thead><tr><th>Data/Hora</th><th>Tipo</th><th>EPI</th><th>CA</th><th>Qtd</th><th>Obs</th></tr></thead><tbody>'
+        +hist.slice(0,50).map(m=>'<tr>'
+          +'<td style="font-size:11px;white-space:nowrap">'+fdt(m.data)+'</td>'
+          +'<td>'+bdgIO(m.io)+' '+bdgT(m.tipo)+'</td>'
+          +'<td style="font-size:12px">'+esc(m.epi)+'</td>'
+          +'<td>'+caLink(m.ca)+'</td>'
+          +'<td><strong>'+ab(m.qtd)+'</strong></td>'
+          +'<td style="font-size:11px;color:var(--g5)">'+esc(m.obs||'-')+'</td>'
+          +'</tr>').join('')
+        +'</tbody></table>'
+        +(hist.length>50?'<div style="text-align:center;padding:10px;font-size:12px;color:var(--g4)">... e mais '+(hist.length-50)+' registros</div>':''))
     +'<div class="ficha-sign" style="margin-top:20px">'
     +'<div style="margin-bottom:30px">Data: _____ / _____ / _________</div>'
     +'<div style="border-top:1px solid var(--g3);padding-top:8px;font-size:12px">Assinatura do Empregado</div>'
@@ -1156,7 +1287,37 @@ function salvarMov() {
 
   document.getElementById('nb-loans').textContent = LOANS.length;
   toast('✅ '+io+' de '+qtd+'x '+epi.nome+' registrada!','ok');
-  closeM('m-mov'); renderDash();
+  closeM('m-mov');
+  renderDash();
+
+  // Após uma retirada (saída) vinculada a um funcionário, oferece imprimir a ficha dele
+  if(tipo==='RET-' && mat>0 && fn) {
+    pendingPrintFicha = { matricula: mat, data: (data||'').slice(0,10) };
+    document.getElementById('pc-resumo').textContent = qtd+'x '+epi.nome+' — '+fn.nome;
+    openM('m-print-confirm');
+  }
+}
+
+let pendingPrintFicha = null;
+
+function confirmarImpressaoFicha() {
+  if(!pendingPrintFicha) { closeM('m-print-confirm'); return; }
+  const { matricula, data } = pendingPrintFicha;
+  closeM('m-print-confirm');
+
+  goPage('ficha', document.querySelector('.ni[onclick*="\'ficha\'"]'));
+  setupFicha();
+  document.getElementById('ficha-sel').value = matricula;
+
+  // Filtra a ficha para mostrar apenas o dia da retirada
+  fichaPeriodo = { ini: data, fim: data };
+  document.getElementById('ficha-data-ini').value = data;
+  document.getElementById('ficha-data-fim').value = data;
+  document.querySelectorAll('#ficha-pills .pill').forEach(p=>p.classList.remove('active'));
+  renderFicha();
+
+  // Pequeno atraso para garantir que o conteúdo renderizou antes de chamar a impressão
+  setTimeout(()=>window.print(), 250);
 }
 
 
