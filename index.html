@@ -193,7 +193,7 @@ select.fc{cursor:pointer}
       <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.8C34.7 33.9 30.1 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15.1 16.2 19.2 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 16.3 2 9.6 6.5 6.3 14.7z"/><path fill="#FBBC05" d="M24 46c5.9 0 11-2 14.7-5.4l-6.8-5.6C29.9 36.8 27.1 38 24 38c-6 0-11-4-12.7-9.5l-7 5.4C7.4 42 15.1 46 24 46z"/><path fill="#EA4335" d="M46 24c0-1.3-.2-2.7-.5-4H24v8.5h11.8c-1 2.9-3.1 5.3-5.8 6.9l6.8 5.6C41.9 37.3 46 31.2 46 24z"/></svg>
       Entrar com Google
     </button>
-    <div style="color:rgba(255,255,255,.2);font-size:11px;margin-top:20px">Apenas e-mails @grupotbx.com.br autorizados</div>
+    <div style="color:rgba(255,255,255,.2);font-size:11px;margin-top:20px">Acesso restrito a colaboradores autorizados do Grupo TBX</div>
   </div>
 </div>
 
@@ -208,7 +208,7 @@ select.fc{cursor:pointer}
 </style>
 
 
-<div class="layout">
+<div class="layout" id="app-layout" style="display:none">
 
 <nav class="sidebar">
   <div class="sb-brand" style="display:block">
@@ -659,18 +659,30 @@ let currentUser = null;
 // ── Auth state handler ──────────────────────────────
 auth.onAuthStateChanged(async user => {
   if (!user) {
+    // Garante que o layout fica oculto para qualquer visitante não autenticado
+    document.getElementById('app-layout').style.display = 'none';
     showLoginScreen();
     return;
   }
-  const email = (user.email || '').toLowerCase();
-  if (!ALLOWED_EMAILS.includes(email)) {
-    await auth.signOut();
-    showLoginScreen('Acesso não autorizado para ' + user.email);
+
+  const email = (user.email || '').toLowerCase().trim();
+  const autorizado = ALLOWED_EMAILS.includes(email);
+
+  if (!autorizado) {
+    // Esconde TUDO antes de qualquer operação assíncrona
+    document.getElementById('app-layout').style.display = 'none';
+    showLoadingOverlay(false);
+    // Desloga imediatamente (síncrono na prática — não aguarda para evitar janela de acesso)
+    auth.signOut();
+    showLoginScreen('❌ Acesso não autorizado para ' + (user.email || 'este e-mail') + '.\nApenas colaboradores autorizados do Grupo TBX podem acessar este sistema.');
     return;
   }
+
+  // Usuário autorizado — mostra o sistema
   currentUser = user;
+  document.getElementById('app-layout').style.display = 'flex';
   hideLoginScreen();
-  setCurrentUserLabel(user.displayName || user.email);
+  setCurrentUserLabel(user.displayName ? user.displayName + ' (' + email + ')' : email);
   await loadAllData();
 });
 
@@ -777,6 +789,7 @@ function showLoginScreen(errMsg) {
 
 function hideLoginScreen() {
   document.getElementById('login-screen').style.display = 'none';
+  // Layout is made visible by the auth handler only after email is verified
 }
 
 function showLoadingOverlay(show) {
