@@ -724,6 +724,7 @@ async function loadAllData() {
     // AQS é calculado dinamicamente em calcAqs() — não vem do banco
 
     document.getElementById('nb-loans').textContent = LOANS.length;
+    recalcTodos(); // recalcula comp e situacao após carregar todos os dados
     renderDash();
     toast('✅ Dados carregados do Firebase!', 'ok');
   } catch(err) {
@@ -815,7 +816,18 @@ function calcSituacao(e) {
   return 'Adequado';
 }
 
+function recalcComp() {
+  // Zera comp em todos os EPIs
+  EPIS.forEach(e => { e.comp = 0; });
+  // Soma qty de cada empréstimo ativo no EPI correspondente
+  LOANS.forEach(l => {
+    const e = EPIS.find(x => x.id === l.codigo);
+    if(e) e.comp = (e.comp || 0) + (l.qtd || 0);
+  });
+}
+
 function recalcTodos() {
+  recalcComp();
   EPIS.forEach(e => { e.situacao = calcSituacao(e); });
 }
 
@@ -1425,6 +1437,7 @@ function devolverLoan(idx) {
   const e = EPIS.find(x=>x.id===l.codigo);
   if(e) { e.atual += l.qtd; e.situacao = calcSituacao(e); }
   LOANS.splice(idx,1);
+  recalcComp(); // atualiza comp após devolução
   document.getElementById('nb-loans').textContent = LOANS.length;
   toast('↩️ Devolução de '+l.epi+' registrada!','ok');
   renderLoans(); renderDash();
@@ -1755,6 +1768,7 @@ function salvarMov() {
     const li = LOANS.findIndex(l=>l.codigo===epi.id && l.matricula===mat);
     if(li!==-1){ LOANS[li].qtd -= qtd; if(LOANS[li].qtd<=0) LOANS.splice(li,1); }
   }
+  recalcComp(); // atualiza comp de todos os EPIs após mudança nos empréstimos
 
   document.getElementById('nb-loans').textContent = LOANS.length;
   toast('✅ '+io+' de '+qtd+'x '+epi.nome+' registrada!','ok');
