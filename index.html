@@ -442,7 +442,7 @@ select.fc{cursor:pointer}
           <div class="sb-wrap"><input class="fc" type="text" placeholder="Buscar EPI..." id="aq-q" oninput="renderAq()" style="width:200px"></div>
         </div>
         <div class="tw"><table>
-          <thead><tr><th>#</th><th>Equipamento</th><th>CA</th><th>Mín</th><th>Máx</th><th>Atual</th><th>Recomendado</th><th>Adquirir</th><th>Prioridade</th></tr></thead>
+          <thead><tr><th>#</th><th>Equipamento</th><th>CA</th><th>Mín</th><th>P. Pedido</th><th>Máx</th><th>Atual</th><th>Alvo</th><th>Adquirir</th><th>Prioridade</th></tr></thead>
           <tbody id="aq-tb"></tbody>
         </table></div>
         <div class="pag" id="aq-pag"></div>
@@ -710,19 +710,18 @@ function setCurrentUserLabel(name) {
 async function loadAllData() {
   showLoadingOverlay(true);
   try {
-    const [episSnap, funcsSnap, movimsSnap, loansSnap, aqsSnap] = await Promise.all([
+    const [episSnap, funcsSnap, movimsSnap, loansSnap] = await Promise.all([
       db.collection('epis').orderBy('id').get(),
       db.collection('funcionarios').orderBy('matricula').get(),
       db.collection('movimentacoes').orderBy('data').get(),
       db.collection('emprestimos').get(),
-      db.collection('sugestoes_aquisicao').orderBy('num').get(),
     ]);
 
     EPIS.length   = 0; episSnap.forEach(d   => EPIS.push(d.data()));
     FUNCS.length  = 0; funcsSnap.forEach(d  => FUNCS.push(d.data()));
     MOVIMS.length = 0; movimsSnap.forEach(d => MOVIMS.push(d.data()));
     LOANS.length  = 0; loansSnap.forEach(d  => LOANS.push(d.data()));
-    AQS.length    = 0; aqsSnap.forEach(d    => AQS.push(d.data()));
+    // AQS é calculado dinamicamente em calcAqs() — não vem do banco
 
     document.getElementById('nb-loans').textContent = LOANS.length;
     renderDash();
@@ -955,6 +954,7 @@ function renderDash() {
   const mxD = ds[0]?ds[0][1]:1;
   document.getElementById('d-depts').innerHTML = ds.map(([d,n])=>'<div class="pr"><div class="prl" title="'+esc(d)+'">'+esc(d)+'</div><div class="prb"><div class="prf" style="width:'+(n/mxD*100)+'%"></div></div><div class="prn">'+n+'</div></div>').join('');
 
+  calcAqs();
   const mxAq = AQS[0]?AQS[0].adquirir:1;
   document.getElementById('d-aq-top').innerHTML = AQS.slice(0,8).map(a=>'<div class="pr"><div class="prl" title="'+esc(a.epi)+'">'+esc(trn(a.epi,22))+'</div><div class="prb"><div class="prf" style="width:'+(a.adquirir/mxAq*100)+'%;background:var(--rd)"></div></div><div class="prn" style="color:var(--rd)">'+Math.round(a.adquirir)+'</div></div>').join('');
 
@@ -1593,12 +1593,55 @@ function renderFicha() {
 }
 
 // ===== AQUISIÇÃO =====
+// Calcula sugestões dinamicamente.
+// Gatilho: atual < ponto_pedido (se definido), senão atual < min.
+// Quantidade a adquirir: até atingir o ideal (ou max se ideal=0).
+function calcAqs() {
+  AQS.length = 0;
+  let num = 1;
+  EPIS
+    .filter(e => {
+      const gatilho = (e.ponto_pedido != null && e.ponto_pedido > 0)
+        ? e.ponto_pedido
+        : (e.min || 0);
+      return e.atual < gatilho;
+    })
+    .sort((a,b) => {
+      // Prioridade: quem está proporcionalmente mais distante do gatilho
+      const gatA = (a.ponto_pedido > 0 ? a.ponto_pedido : a.min) || 1;
+      const gatB = (b.ponto_pedido > 0 ? b.ponto_pedido : b.min) || 1;
+      const propA = a.atual / gatA;
+      const propB = b.atual / gatB;
+      return propA - propB;
+    })
+    .forEach(e => {
+      const gatilho  = (e.ponto_pedido > 0 ? e.ponto_pedido : e.min) || 0;
+      const alvo     = e.ideal || e.max || gatilho;
+      const adquirir = Math.max(0, alvo - e.atual);
+      if(adquirir <= 0) return;
+      AQS.push({
+        num,
+        epi:           e.nome,
+        ca:            e.ca || 'N.A.',
+        min:           e.min || 0,
+        ponto_pedido:  e.ponto_pedido ?? null,
+        max:           e.max || 0,
+        atual:         Math.round(e.atual),
+        gatilho,
+        recom:         alvo,
+        adquirir,
+      });
+      num++;
+    });
+}
+
 let aqP=1;
 function goAqP(p){ aqP=p; renderAq(); }
 function renderAq() {
+  calcAqs();
   const q = (document.getElementById('aq-q')?.value||'').toLowerCase();
   let f = AQS.filter(a=>!q||a.epi.toLowerCase().includes(q));
-  document.getElementById('aq-count').textContent = f.length+' itens para adquirir';
+  document.getElementById('aq-count').textContent = f.length+' EPIs com estoque abaixo do ideal';
   const mxAd = Math.max(...f.map(a=>a.adquirir),1);
   const items = paginate(f, aqP);
   document.getElementById('aq-tb').innerHTML = items.length===0
@@ -1607,13 +1650,18 @@ function renderAq() {
         const pct = (a.adquirir/mxAd)*100;
         const pc  = pct>75?'br':pct>40?'bo':'bb';
         const lb  = pct>75?'Urgente':pct>40?'Médio':'Baixo';
+        const ppStr = a.ponto_pedido > 0
+          ? '<strong>'+a.ponto_pedido+'</strong>'
+          : '<span style="color:var(--g4);font-size:11px">—</span>';
+        const gatilhoColor = a.atual < a.gatilho ? 'var(--rd)' : 'inherit';
         return '<tr>'
           +'<td style="color:var(--g4);font-size:12px">'+a.num+'</td>'
           +'<td><div class="tdm">'+esc(a.epi)+'</div></td>'
           +'<td>'+caLink(a.ca)+'</td>'
           +'<td class="tdc">'+a.min+'</td>'
+          +'<td class="tdc">'+ppStr+'</td>'
           +'<td class="tdc">'+a.max+'</td>'
-          +'<td class="tdc"><strong style="color:'+(a.atual<a.min?'var(--rd)':'inherit')+'">'+Math.round(a.atual)+'</strong></td>'
+          +'<td class="tdc"><strong style="color:'+gatilhoColor+'">'+Math.round(a.atual)+'</strong></td>'
           +'<td class="tdc">'+Math.round(a.recom)+'</td>'
           +'<td class="tdc"><strong style="color:var(--rd);font-size:16px">'+Math.round(a.adquirir)+'</strong></td>'
           +'<td><div class="sbar-w"><div class="sbar" style="width:80px"><div class="sf sfr" style="width:'+pct+'%"></div></div><span class="badge '+pc+'" style="font-size:10px">'+lb+'</span></div></td>'
