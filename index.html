@@ -809,6 +809,17 @@ function ab(v)  { return Math.abs(v||0); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function trn(s,n){ s=String(s||''); return s.length>n ? s.slice(0,n)+'…' : s; }
 
+function calcSituacao(e) {
+  if(e.atual <= 0) return 'Baixo';
+  if(e.min  > 0 && e.atual < e.min)  return 'Baixo';
+  if(e.max  > 0 && e.atual > e.max)  return 'Alto';
+  return 'Adequado';
+}
+
+function recalcTodos() {
+  EPIS.forEach(e => { e.situacao = calcSituacao(e); });
+}
+
 function bdg(s) {
   if(s==='Adequado') return '<span class="badge bg">✅ Adequado</span>';
   if(s==='Baixo')    return '<span class="badge bo">⚠️ Baixo</span>';
@@ -867,7 +878,7 @@ function renderPag(cid, total, page, fn) {
 
 function closeM(id){ document.getElementById(id).classList.remove('open'); }
 function openM(id) { document.getElementById(id).classList.add('open'); }
-document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+// Click fora do modal desabilitado — use os botões Salvar ou Cancelar para fechar
 
 function switchTab(el, tid) {
   el.closest('.mb').querySelectorAll('.tab').forEach(t=>t.classList.remove('act'));
@@ -904,6 +915,7 @@ function goPage(pg, el) {
 // ===== DASHBOARD =====
 
 function renderDash() {
+  recalcTodos();
   document.getElementById('d-epis').textContent  = EPIS.length;
   document.getElementById('d-funcs').textContent = FUNCS.length;
   document.getElementById('d-movs').textContent  = MOVIMS.length;
@@ -1027,6 +1039,7 @@ function renderMensal() {
 let estP=1;
 function goEstP(p){ estP=p; renderEst(); }
 function renderEst() {
+  recalcTodos();
   const q   = (document.getElementById('est-q')?.value||'').toLowerCase();
   const sit = document.getElementById('est-sit')?.value||'';
   const cat = document.getElementById('est-cat')?.value||'';
@@ -1163,10 +1176,12 @@ function salvarEpi() {
   };
   if(id) {
     const i = EPIS.findIndex(e=>e.id===id);
-    if(i!==-1) Object.assign(EPIS[i], data);
+    if(i!==-1) { Object.assign(EPIS[i], data); EPIS[i].situacao = calcSituacao(EPIS[i]); }
     toast('EPI atualizado!','ok');
   } else {
-    EPIS.unshift({ id: Math.max(...EPIS.map(e=>e.id),0)+1, ...data });
+    const novo = { id: Math.max(...EPIS.map(e=>e.id),0)+1, ...data };
+    novo.situacao = calcSituacao(novo);
+    EPIS.unshift(novo);
     toast('EPI cadastrado!','ok');
   }
   closeM('m-epi'); renderEst(); renderDash();
@@ -1408,7 +1423,7 @@ function devolverLoan(idx) {
   const now = new Date().toISOString().slice(0,19).replace('T',' ');
   MOVIMS.push({io:'Entrada',tipo:'DEV+',tipo_desc:'(+) Devolução',codigo:l.codigo,epi:l.epi,ca:l.ca,qtd:l.qtd,matricula:l.matricula,funcionario:l.funcionario,data:now,usuario:'Sistema',obs:'Devolução registrada pelo sistema'});
   const e = EPIS.find(x=>x.id===l.codigo);
-  if(e) e.atual += l.qtd;
+  if(e) { e.atual += l.qtd; e.situacao = calcSituacao(e); }
   LOANS.splice(idx,1);
   document.getElementById('nb-loans').textContent = LOANS.length;
   toast('↩️ Devolução de '+l.epi+' registrada!','ok');
@@ -1673,6 +1688,7 @@ function salvarMov() {
   const fn = FUNCS.find(f=>f.matricula===mat);
   if(io==='Entrada') epi.atual += qtd;
   else               epi.atual -= qtd;
+  epi.situacao = calcSituacao(epi);
 
   MOVIMS.push({
     io, tipo, tipo_desc: TIPO_DESC[tipo]||tipo,
@@ -1871,7 +1887,7 @@ function openCaConfig() {
 // ===== INIT =====
 // Data is loaded by Firebase auth state change handler (loadAllData)
 // The UI is shown after auth confirms user is authorized
-document.querySelectorAll('.mo').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('open'); }));
+// Click fora do modal desabilitado — use os botões Salvar ou Cancelar para fechar
 // renderDash() called after Firebase data load
 
 // Informa se a busca automática de CA ainda não foi configurada
