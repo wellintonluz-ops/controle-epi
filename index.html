@@ -309,6 +309,7 @@ select.fc{cursor:pointer}
               <option value="Alto">🔴 Alto</option>
             </select>
             <select class="fc" id="est-cat" onchange="renderEst()" style="width:170px"><option value="">Todos os tipos CA</option></select>
+            <button class="btn bsc bsm" onclick="exportarEstoqueExcel()" title="Baixar relatório de estoque para inventário">📊 Exportar Inventário</button>
             <button class="btn bp bsm" onclick="openEpiModal()">+ Novo EPI</button>
           </div>
         </div>
@@ -1646,18 +1647,29 @@ function calcAqs() {
       return e.atual < gatilho;
     })
     .sort((a,b) => {
-      // Prioridade: quem está proporcionalmente mais distante do gatilho
+      // Ordena: sem estoque primeiro, depois proporcionalmente mais distante do gatilho
+      if(a.atual <= 0 && b.atual > 0) return -1;
+      if(b.atual <= 0 && a.atual > 0) return  1;
       const gatA = (a.ponto_pedido > 0 ? a.ponto_pedido : a.min) || 1;
       const gatB = (b.ponto_pedido > 0 ? b.ponto_pedido : b.min) || 1;
-      const propA = a.atual / gatA;
-      const propB = b.atual / gatB;
-      return propA - propB;
+      return (a.atual / gatA) - (b.atual / gatB);
     })
     .forEach(e => {
       const gatilho  = (e.ponto_pedido > 0 ? e.ponto_pedido : e.min) || 0;
       const alvo     = e.ideal || e.max || gatilho;
       const adquirir = Math.max(0, alvo - e.atual);
       if(adquirir <= 0) return;
+      // Calcula prioridade junto com o item
+      let prioLabel, prioClass;
+      if(Math.round(e.atual) <= 0) {
+        prioLabel = 'Urgente'; prioClass = 'br';
+      } else {
+        const perc = gatilho > 0 ? (e.atual / gatilho) : 1;
+        if(perc <= 0.25)      { prioLabel = 'Urgente'; prioClass = 'br'; }
+        else if(perc <= 0.60) { prioLabel = 'Alto';    prioClass = 'bo'; }
+        else if(perc <= 0.85) { prioLabel = 'Médio';   prioClass = 'bb'; }
+        else                  { prioLabel = 'Baixo';   prioClass = 'bc'; }
+      }
       AQS.push({
         num,
         epi:           e.nome,
@@ -1669,6 +1681,8 @@ function calcAqs() {
         gatilho,
         recom:         alvo,
         adquirir,
+        prioLabel,
+        prioClass,
       });
       num++;
     });
@@ -1686,9 +1700,18 @@ function renderAq() {
   document.getElementById('aq-tb').innerHTML = items.length===0
     ? '<tr><td colspan="9"><div class="empty"><div class="ei">🛒</div><div class="et">Nenhuma sugestão encontrada</div></div></td></tr>'
     : items.map(a=>{
-        const pct = (a.adquirir/mxAd)*100;
-        const pc  = pct>75?'br':pct>40?'bo':'bb';
-        const lb  = pct>75?'Urgente':pct>40?'Médio':'Baixo';
+        // Prioridade baseada em regras absolutas de estoque
+        let pc, lb;
+        if(a.atual <= 0) {
+          pc = 'br'; lb = 'Urgente'; // sem estoque
+        } else {
+          const percGatilho = a.gatilho > 0 ? (a.atual / a.gatilho) : 1;
+          if(percGatilho <= 0.25)      { pc = 'br'; lb = 'Urgente'; } // ≤25% do ponto de pedido
+          else if(percGatilho <= 0.60) { pc = 'bo'; lb = 'Alto'; }    // ≤60%
+          else if(percGatilho <= 0.85) { pc = 'bb'; lb = 'Médio'; }   // ≤85%
+          else                         { pc = 'bc'; lb = 'Baixo'; }    // >85% (quase no gatilho)
+        }
+        const pct = a.gatilho > 0 ? Math.min(100, (1 - a.atual/a.gatilho)*100) : 100;
         const ppStr = a.ponto_pedido > 0
           ? '<strong>'+a.ponto_pedido+'</strong>'
           : '<span style="color:var(--g4);font-size:11px">—</span>';
@@ -1703,7 +1726,7 @@ function renderAq() {
           +'<td class="tdc"><strong style="color:'+gatilhoColor+'">'+Math.round(a.atual)+'</strong></td>'
           +'<td class="tdc">'+Math.round(a.recom)+'</td>'
           +'<td class="tdc"><strong style="color:var(--rd);font-size:16px">'+Math.round(a.adquirir)+'</strong></td>'
-          +'<td><div class="sbar-w"><div class="sbar" style="width:80px"><div class="sf sfr" style="width:'+pct+'%"></div></div><span class="badge '+pc+'" style="font-size:10px">'+lb+'</span></div></td>'
+          +'<td><div class="sbar-w"><div class="sbar" style="width:80px"><div class="sf '+(a.atual<=0?'sfr':pct>60?'sfr':pct>30?'sfo':'sfg')+'" style="width:'+Math.min(100,pct)+'%"></div></div><span class="badge '+pc+'" style="font-size:10px">'+lb+'</span></div></td>'
           +'</tr>';
       }).join('');
   renderPag('aq-pag', f.length, aqP, 'goAqP');
@@ -1971,6 +1994,106 @@ function openCaConfig() {
   toast(url ? '✅ URL do proxy de CA salva!' : 'URL removida', url ? 'ok' : '');
 }
 
+
+// ===== EXPORTAR ESTOQUE (INVENTÁRIO) =====
+function exportarEstoqueExcel() {
+  if(typeof XLSX === 'undefined') {
+    toast('Biblioteca de exportação não carregada. Verifique sua conexão.','err');
+    return;
+  }
+
+  // Respeita filtros ativos na tela
+  const q    = (document.getElementById('est-q')?.value   || '').toLowerCase();
+  const sit  = document.getElementById('est-sit')?.value  || '';
+  const cat  = document.getElementById('est-cat')?.value  || '';
+
+  let filtrados = EPIS.filter(e => {
+    const mq  = !q   || e.nome.toLowerCase().includes(q) || String(e.ca).includes(q) || (e.ca_tipo||'').toLowerCase().includes(q);
+    const ms  = !sit || e.situacao === sit;
+    const mc  = !cat || e.ca_tipo  === cat;
+    return mq && ms && mc;
+  });
+
+  if(!filtrados.length) {
+    toast('Nenhum EPI encontrado com os filtros atuais.','err');
+    return;
+  }
+
+  const agora   = new Date();
+  const dataStr = agora.toLocaleDateString('pt-BR');
+  const horaStr = agora.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+
+  // ── Aba 1: Inventário completo ──
+  const linhas = filtrados.map((e, i) => ({
+    '#':             i + 1,
+    'Código':        e.id,
+    'Equipamento (EPI)': e.nome,
+    'Nº CA':         e.ca || 'N.A.',
+    'Tipo CA':       e.ca_tipo || '',
+    'Mínimo':        e.min     || 0,
+    'Ponto de Pedido': e.ponto_pedido ?? '',
+    'Ideal':         e.ideal   || 0,
+    'Máximo':        e.max     || 0,
+    'Com Funcionários': Math.round(Math.abs(e.comp || 0)),
+    'Estoque Físico': Math.round(e.atual || 0),
+    'Situação':      e.situacao || 'Adequado',
+    'Prazo CA':      e.ca_prazo ? e.ca_prazo.slice(0,10).split('-').reverse().join('/') : '',
+    'Fabricante':    e.ca_fabricante || '',
+    'Observações':   e.obs || '',
+    'Contagem Física': '',   // coluna em branco para preenchimento manual
+    'Diferença':     '',     // coluna em branco para conferência
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(linhas);
+
+  // Larguras
+  ws['!cols'] = [
+    {wch:5},{wch:8},{wch:38},{wch:10},{wch:20},{wch:8},{wch:14},
+    {wch:8},{wch:8},{wch:16},{wch:14},{wch:12},{wch:12},
+    {wch:30},{wch:28},{wch:18},{wch:12},
+  ];
+
+  // Congela linha de cabeçalho
+  ws['!freeze'] = { xSplit:0, ySplit:1 };
+
+  // ── Aba 2: Resumo por Situação ──
+  const porSit = { Adequado:0, Baixo:0, Alto:0 };
+  filtrados.forEach(e => { porSit[e.situacao] = (porSit[e.situacao]||0) + 1; });
+  const resumoLinhas = [
+    { 'Situação':'✅ Adequado', 'Quantidade': porSit.Adequado },
+    { 'Situação':'⚠️ Baixo',   'Quantidade': porSit.Baixo    },
+    { 'Situação':'🔴 Alto',    'Quantidade': porSit.Alto     },
+    { 'Situação':'TOTAL',      'Quantidade': filtrados.length },
+  ];
+  const wsResumo = XLSX.utils.json_to_sheet(resumoLinhas);
+  wsResumo['!cols'] = [{wch:16},{wch:12}];
+
+  // ── Aba 3: Apenas EPIs com atenção (Baixo ou Alto) ──
+  const criticos = filtrados.filter(e => e.situacao !== 'Adequado');
+  const wsCrit = XLSX.utils.json_to_sheet(criticos.length ? criticos.map((e,i)=>({
+    '#':               i+1,
+    'Equipamento':     e.nome,
+    'CA':              e.ca || 'N.A.',
+    'Situação':        e.situacao,
+    'Mínimo':          e.min || 0,
+    'Ponto de Pedido': e.ponto_pedido ?? '',
+    'Estoque Físico':  Math.round(e.atual),
+    'Com Funcionários':Math.round(Math.abs(e.comp||0)),
+    'Adquirir':        Math.max(0, (e.ideal||e.max||e.min||0) - Math.round(e.atual)),
+  })) : [{ 'Info': 'Nenhum EPI com estoque crítico' }]);
+  wsCrit['!cols'] = [{wch:4},{wch:38},{wch:10},{wch:10},{wch:8},{wch:14},{wch:14},{wch:16},{wch:10}];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Inventário Completo');
+  XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo por Situação');
+  XLSX.utils.book_append_sheet(wb, wsCrit, 'Atenção no Estoque');
+
+  const dataArq = agora.toISOString().slice(0,10);
+  const filtroStr = sit ? '_'+sit.toLowerCase() : '';
+  XLSX.writeFile(wb, 'inventario_epi'+filtroStr+'_'+dataArq+'.xlsx');
+
+  toast('📊 Inventário exportado — '+filtrados.length+' EPIs ('+dataStr+' '+horaStr+')','ok');
+}
 
 // ===== IMPORTAR FUNCIONÁRIOS =====
 let importFuncBuffer = []; // dados parseados aguardando confirmação
