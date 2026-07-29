@@ -675,7 +675,7 @@ const FIREBASE_CONFIG = {
   measurementId: "G-2EYHHT7589"
 };
 
-const ALLOWED_EMAILS = ['rh@grupotbx.com.br', 'cristiane.becker@grupotbx.com.br', 'wellinton.luz@grupotbx.com.br', 'felipe.turek@grupotbx.com.br', 'eduardo.seremeta@grupotbx.com.br'];
+const ALLOWED_EMAILS = ['rh@grupotbx.com.br', 'cristiane.becker@grupotbx.com.br', 'wellinton.luz@grupotbx.com.br', 'felipe.turek@grupotbx.com.br', 'eduardo.seremeta@grupotbx.com.br', 'maria.menezes@grupotbx.com.br'];
 
 firebase.initializeApp(FIREBASE_CONFIG);
 const auth = firebase.auth();
@@ -696,12 +696,15 @@ auth.onAuthStateChanged(async user => {
   const autorizado = ALLOWED_EMAILS.includes(email);
 
   if (!autorizado) {
-    // Esconde TUDO antes de qualquer operação assíncrona
     document.getElementById('app-layout').style.display = 'none';
     showLoadingOverlay(false);
-    // Desloga imediatamente (síncrono na prática — não aguarda para evitar janela de acesso)
     auth.signOut();
-    showLoginScreen('❌ Acesso não autorizado para ' + (user.email || 'este e-mail') + '.\nApenas colaboradores autorizados do Grupo TBX podem acessar este sistema.');
+    // Mostra o e-mail exato retornado pelo Google para facilitar diagnóstico
+    showLoginScreen(
+      '❌ Acesso não autorizado.' +
+      '\n\nE-mail detectado: ' + (user.email || 'desconhecido') +
+      '\n\nSe este é seu e-mail correto, entre em contato com o administrador do sistema.'
+    );
     return;
   }
 
