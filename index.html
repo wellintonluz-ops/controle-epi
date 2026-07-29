@@ -2025,32 +2025,21 @@ function exportarEstoqueExcel() {
 
   // ── Aba 1: Inventário completo ──
   const linhas = filtrados.map((e, i) => ({
-    '#':             i + 1,
-    'Código':        e.id,
+    '#':               i + 1,
+    'Código':          e.id,
     'Equipamento (EPI)': e.nome,
-    'Nº CA':         e.ca || 'N.A.',
-    'Tipo CA':       e.ca_tipo || '',
-    'Mínimo':        e.min     || 0,
-    'Ponto de Pedido': e.ponto_pedido ?? '',
-    'Ideal':         e.ideal   || 0,
-    'Máximo':        e.max     || 0,
-    'Com Funcionários': Math.round(Math.abs(e.comp || 0)),
-    'Estoque Físico': Math.round(e.atual || 0),
-    'Situação':      e.situacao || 'Adequado',
-    'Prazo CA':      e.ca_prazo ? e.ca_prazo.slice(0,10).split('-').reverse().join('/') : '',
-    'Fabricante':    e.ca_fabricante || '',
-    'Observações':   e.obs || '',
-    'Contagem Física': '',   // coluna em branco para preenchimento manual
-    'Diferença':     '',     // coluna em branco para conferência
+    'Nº CA':           e.ca || 'N.A.',
+    'Estoque Físico':  Math.round(e.atual || 0),
+    'Situação':        e.situacao || 'Adequado',
+    'Contagem Física': '',
+    'Diferença':       '',
   }));
 
   const ws = XLSX.utils.json_to_sheet(linhas);
 
   // Larguras
   ws['!cols'] = [
-    {wch:5},{wch:8},{wch:38},{wch:10},{wch:20},{wch:8},{wch:14},
-    {wch:8},{wch:8},{wch:16},{wch:14},{wch:12},{wch:12},
-    {wch:30},{wch:28},{wch:18},{wch:12},
+    {wch:5},{wch:8},{wch:42},{wch:10},{wch:14},{wch:12},{wch:16},{wch:12},
   ];
 
   // Congela linha de cabeçalho
