@@ -177,6 +177,21 @@ select.fc{cursor:pointer}
   .content{padding:0}
 }
 
+
+/* ── Searchable Select ─────────────────────────────── */
+.ss-wrap{position:relative;width:100%}
+.ss-input{width:100%;padding:9px 32px 9px 11px;border:1px solid var(--g3);border-radius:var(--r);font-size:13px;color:var(--g9);background:var(--g0);outline:none;transition:all .15s;cursor:pointer}
+.ss-input:focus{border-color:var(--y);background:var(--wh);box-shadow:0 0 0 3px rgba(245,166,35,.15)}
+.ss-arrow{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--g5);font-size:11px}
+.ss-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--wh);border:1px solid var(--g3);border-radius:var(--r);box-shadow:var(--shl);z-index:3000;max-height:240px;overflow-y:auto;display:none}
+.ss-dropdown.open{display:block}
+.ss-option{padding:9px 12px;font-size:13px;cursor:pointer;color:var(--g9);transition:background .1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-option:hover,.ss-option.focused{background:var(--g1)}
+.ss-option.selected{background:var(--ybg);color:#92400e;font-weight:600}
+.ss-empty{padding:10px 12px;font-size:12px;color:var(--g5);text-align:center}
+.ss-search-row{padding:8px;border-bottom:1px solid var(--g2);position:sticky;top:0;background:var(--wh)}
+.ss-search-input{width:100%;padding:6px 10px;border:1px solid var(--g3);border-radius:6px;font-size:12px;outline:none}
+.ss-search-input:focus{border-color:var(--y)}
 </style>
 </head>
 <body>
@@ -664,6 +679,180 @@ const PER = 25;
 const pgs = {};
 
 
+
+// ===== SEARCHABLE SELECT =====
+class SearchableSelect {
+  constructor(id, { placeholder = 'Selecione...', searchPlaceholder = 'Buscar...', onChange = null } = {}) {
+    this.id          = id;
+    this.onChange    = onChange;
+    this.value       = '';
+    this.options     = []; // [{value, label}]
+    this.placeholder = placeholder;
+    this.searchPlaceholder = searchPlaceholder;
+    this._build();
+  }
+
+  _build() {
+    const old = document.getElementById(this.id);
+    if(!old) return;
+
+    this.wrap = document.createElement('div');
+    this.wrap.className = 'ss-wrap';
+    this.wrap.innerHTML =
+      '<input type="text" class="ss-input" id="' + this.id + '" readonly placeholder="' + this.placeholder + '" autocomplete="off">' +
+      '<span class="ss-arrow">▼</span>' +
+      '<div class="ss-dropdown" id="' + this.id + '-dd">' +
+        '<div class="ss-search-row"><input type="text" class="ss-search-input" placeholder="' + this.searchPlaceholder + '"></div>' +
+        '<div class="ss-list"></div>' +
+      '</div>';
+
+    old.parentNode.replaceChild(this.wrap, old);
+
+    this.input    = this.wrap.querySelector('.ss-input');
+    this.dropdown = this.wrap.querySelector('.ss-dropdown');
+    this.list     = this.wrap.querySelector('.ss-list');
+    this.search   = this.wrap.querySelector('.ss-search-input');
+
+    this.input.addEventListener('click', () => this._toggle());
+    this.input.addEventListener('keydown', e => {
+      if(e.key === 'ArrowDown') { this._open(); this.search.focus(); }
+    });
+    this.search.addEventListener('input', () => this._renderList(this.search.value));
+    this.search.addEventListener('keydown', e => {
+      if(e.key === 'Escape') this._close();
+      if(e.key === 'ArrowDown') {
+        const first = this.list.querySelector('.ss-option');
+        if(first) first.focus();
+      }
+    });
+
+    document.addEventListener('click', e => {
+      if(!this.wrap.contains(e.target)) this._close();
+    });
+  }
+
+  _toggle() { this.dropdown.classList.contains('open') ? this._close() : this._open(); }
+
+  _open() {
+    this.dropdown.classList.add('open');
+    this.search.value = '';
+    this._renderList('');
+    setTimeout(() => this.search.focus(), 50);
+  }
+
+  _close() {
+    this.dropdown.classList.remove('open');
+    this.search.value = '';
+  }
+
+  _renderList(q) {
+    const filtered = q
+      ? this.options.filter(o => o.label.toLowerCase().includes(q.toLowerCase()))
+      : this.options;
+
+    if(!filtered.length) {
+      this.list.innerHTML = '<div class="ss-empty">Nenhum resultado encontrado</div>';
+      return;
+    }
+
+    this.list.innerHTML = filtered.map(o =>
+      '<div class="ss-option' + (o.value === this.value ? ' selected' : '') + '" data-value="' + o.value + '" tabindex="0">' + o.label + '</div>'
+    ).join('');
+
+    this.list.querySelectorAll('.ss-option').forEach(el => {
+      el.addEventListener('click', () => this._select(el.dataset.value, el.textContent));
+      el.addEventListener('keydown', e => {
+        if(e.key === 'Enter') this._select(el.dataset.value, el.textContent);
+        if(e.key === 'ArrowDown') { const n = el.nextElementSibling; if(n) n.focus(); }
+        if(e.key === 'ArrowUp')   { const p = el.previousElementSibling; if(p) p.focus(); else this.search.focus(); }
+        if(e.key === 'Escape') this._close();
+      });
+    });
+
+    // Scroll to selected
+    const sel = this.list.querySelector('.selected');
+    if(sel) sel.scrollIntoView({ block:'nearest' });
+  }
+
+  _select(value, label) {
+    this.value = value;
+    this.input.value = value ? label : '';
+    this._close();
+    if(this.onChange) this.onChange(value, label);
+  }
+
+  setOptions(options) {
+    // options: [{value, label}]
+    this.options = options;
+    if(this.value && !options.find(o => o.value === this.value)) {
+      this.value = '';
+      this.input.value = '';
+    }
+  }
+
+  setValue(value) {
+    const opt = this.options.find(o => String(o.value) === String(value));
+    this.value = value || '';
+    this.input.value = opt ? opt.label : (value ? String(value) : '');
+  }
+
+  getValue() { return this.value; }
+
+  reset(placeholder) {
+    this.value = '';
+    this.input.value = '';
+    if(placeholder) this.input.placeholder = placeholder;
+  }
+}
+
+// Instâncias globais dos searchable selects
+let ssMovEpi  = null;
+let ssMovFunc = null;
+let ssFicha   = null;
+let ssLoanFF  = null;
+
+function initSearchableSelects() {
+  // Modal movimentação — EPI
+  if(document.getElementById('mov-epi-sel') && !ssMovEpi) {
+    ssMovEpi = new SearchableSelect('mov-epi-sel', {
+      placeholder: 'Selecione o EPI...',
+      searchPlaceholder: 'Buscar EPI...',
+      onChange: (val) => onMovEpi()
+    });
+  }
+
+  // Modal movimentação — Funcionário
+  if(document.getElementById('mov-func-sel') && !ssMovFunc) {
+    ssMovFunc = new SearchableSelect('mov-func-sel', {
+      placeholder: 'Não Aplicável',
+      searchPlaceholder: 'Buscar funcionário...',
+    });
+  }
+
+  // Ficha de EPI — funcionário
+  if(document.getElementById('ficha-sel') && !ssFicha) {
+    ssFicha = new SearchableSelect('ficha-sel', {
+      placeholder: 'Selecione o funcionário...',
+      searchPlaceholder: 'Buscar funcionário...',
+      onChange: () => renderFicha()
+    });
+  }
+
+  // Empréstimos — filtro funcionário
+  if(document.getElementById('loan-ff') && !ssLoanFF) {
+    ssLoanFF = new SearchableSelect('loan-ff', {
+      placeholder: 'Todos os funcionários',
+      searchPlaceholder: 'Buscar funcionário...',
+      onChange: () => renderLoans()
+    });
+  }
+}
+
+// Helpers para compatibilidade com código existente
+function ssGetMovEpi()  { return ssMovEpi  ? ssMovEpi.getValue()  : ''; }
+function ssGetMovFunc() { return ssMovFunc ? ssMovFunc.getValue() : ''; }
+function ssGetFicha()   { return ssFicha   ? ssFicha.getValue()   : ''; }
+
 // ===== FIREBASE =====
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyBGFPE9hQ-01EfiWm3Y1SbHWDsytHnkNOM",
@@ -755,6 +944,7 @@ async function loadAllData() {
 
     document.getElementById('nb-loans').textContent = LOANS.length;
     recalcTodos(); // recalcula comp e situacao após carregar todos os dados
+    initSearchableSelects();
     renderDash();
     toast('✅ Dados carregados do Firebase!', 'ok');
   } catch(err) {
@@ -1430,12 +1620,14 @@ let loanP=1;
 function goLoanP(p){ loanP=p; renderLoans(); }
 function renderLoans() {
   const q  = (document.getElementById('loan-q')?.value||'').toLowerCase();
-  const ff = document.getElementById('loan-ff')?.value||'';
-  const fs = document.getElementById('loan-ff');
-  if(fs && fs.children.length<=1) {
-    [...new Set(LOANS.map(l=>l.funcionario))].sort().forEach(fn=>{
-      const o=document.createElement('option'); o.value=fn; o.textContent=fn; fs.appendChild(o);
-    });
+  const ff = ssLoanFF ? ssLoanFF.getValue() : (document.getElementById('loan-ff')?.value||'');
+  // Popula searchable select de funcionários
+  if(ssLoanFF) {
+    const loanFuncs = [...new Set(LOANS.map(l=>l.funcionario))].sort();
+    ssLoanFF.setOptions([
+      { value:'', label:'Todos os funcionários' },
+      ...loanFuncs.map(fn => ({ value:fn, label:fn }))
+    ]);
   }
   let f = LOANS.filter(l=>{
     const mq = !q || l.epi.toLowerCase().includes(q) || l.funcionario.toLowerCase().includes(q) || String(l.matricula).includes(q);
@@ -1481,9 +1673,12 @@ function devolverLoan(idx) {
 
 // ===== FICHA =====
 function setupFicha() {
-  const sel = document.getElementById('ficha-sel');
-  if(sel.children.length<=1) {
-    FUNCS.forEach(f=>{ const o=document.createElement('option'); o.value=f.matricula; o.textContent=f.nome+' ('+f.matricula+')'; sel.appendChild(o); });
+  initSearchableSelects();
+  if(ssFicha) {
+    ssFicha.setOptions([
+      ...FUNCS.sort((a,b)=>a.nome.localeCompare(b.nome))
+              .map(f => ({ value: String(f.matricula), label: f.nome + ' (' + f.matricula + ')' }))
+    ]);
   }
   const pillsEl = document.getElementById('ficha-pills');
   if(pillsEl && pillsEl.children.length===0) {
@@ -1558,7 +1753,7 @@ function dataNoPeriodo(dataStr) {
 }
 
 function renderFicha() {
-  const mat = parseInt(document.getElementById('ficha-sel').value);
+  const mat = parseInt(ssFicha ? ssFicha.getValue() : document.getElementById('ficha-sel')?.value || 0);
   const periodoBar = document.getElementById('ficha-periodo-bar');
   if(!mat){
     periodoBar.style.display = 'none';
@@ -1742,13 +1937,21 @@ const TIPO_DESC = {'AQU+':'(+) Aquisição','DEV+':'(+) Devolução','AJU+':'(+)
 function openMov(io) {
   document.getElementById('mov-tipo-sel').value = io==='Entrada' ? 'AQU+' : 'RET-';
 
-  const es = document.getElementById('mov-epi-sel');
-  es.innerHTML = '<option value="">Selecione o EPI...</option>';
-  EPIS.forEach(e=>{ const o=document.createElement('option'); o.value=e.id; o.textContent=e.nome+' (Físico: '+Math.round(e.atual)+')'; es.appendChild(o); });
+  // Inicializa searchable selects se ainda não existirem
+  initSearchableSelects();
 
-  const fs = document.getElementById('mov-func-sel');
-  fs.innerHTML = '<option value="">Não Aplicável</option>';
-  FUNCS.forEach(f=>{ const o=document.createElement('option'); o.value=f.matricula; o.textContent=f.nome+' — '+f.matricula; fs.appendChild(o); });
+  // Popula EPI
+  ssMovEpi.setOptions([
+    ...EPIS.map(e => ({ value: String(e.id), label: e.nome + ' (Físico: ' + Math.round(e.atual) + ')' }))
+  ]);
+  ssMovEpi.reset('Selecione o EPI...');
+
+  // Popula Funcionário
+  ssMovFunc.setOptions([
+    { value: '', label: 'Não Aplicável' },
+    ...FUNCS.map(f => ({ value: String(f.matricula), label: f.nome + ' — ' + f.matricula }))
+  ]);
+  ssMovFunc.reset('Não Aplicável');
 
   document.getElementById('mov-data').value = new Date().toISOString().slice(0,16);
   document.getElementById('mov-qtd').value  = 1;
@@ -1766,7 +1969,7 @@ function onMovTipo() {
 }
 
 function onMovEpi() {
-  const id   = parseInt(document.getElementById('mov-epi-sel').value);
+  const id   = parseInt(ssMovEpi ? ssMovEpi.getValue() : document.getElementById('mov-epi-sel')?.value || 0);
   const info = document.getElementById('mov-epi-info');
   if(!id){ info.style.display='none'; return; }
   const e = EPIS.find(x=>x.id===id);
@@ -1783,10 +1986,10 @@ function onMovEpi() {
 
 function salvarMov() {
   const tipo  = document.getElementById('mov-tipo-sel').value;
-  const epiId = parseInt(document.getElementById('mov-epi-sel').value);
+  const epiId = parseInt(ssMovEpi  ? ssMovEpi.getValue()  : 0);
   const qtd   = parseFloat(document.getElementById('mov-qtd').value);
   const data  = document.getElementById('mov-data').value;
-  const mat   = parseInt(document.getElementById('mov-func-sel').value)||0;
+  const mat   = parseInt(ssMovFunc ? ssMovFunc.getValue() : 0)||0;
   const obs   = document.getElementById('mov-obs').value;
 
   if(!epiId){ toast('Selecione o EPI','err'); return; }
