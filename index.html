@@ -323,7 +323,7 @@ select.fc{cursor:pointer}
               <option value="Baixo">⚠️ Baixo</option>
               <option value="Alto">🔴 Alto</option>
             </select>
-            <select class="fc" id="est-cat" onchange="renderEst()" style="width:170px"><option value="">Todos os tipos CA</option></select>
+            <select class="fc" id="est-cat" style="width:170px"><option value="">Todos os tipos CA</option></select>
             <button class="btn bsc bsm" onclick="exportarEstoqueExcel()" title="Baixar relatório de estoque para inventário">📊 Exportar Inventário</button>
             <button class="btn bp bsm" onclick="openEpiModal()">+ Novo EPI</button>
           </div>
@@ -358,7 +358,7 @@ select.fc{cursor:pointer}
           <div><div class="ct">Cadastro de Funcionários</div><div class="csub" id="func-count"></div></div>
           <div class="ctools">
             <div class="sb-wrap"><input class="fc" type="text" placeholder="Nome, matrícula, cargo..." id="func-q" oninput="renderFuncs()" style="width:220px"></div>
-            <select class="fc" id="func-df" onchange="renderFuncs()" style="width:155px"><option value="">Todos departamentos</option></select>
+            <select class="fc" id="func-df" style="width:155px"><option value="">Todos departamentos</option></select>
             <button class="btn bs bsm" onclick="document.getElementById('import-func-input').click()" title="Importar planilha Excel de colaboradores">📥 Importar Excel</button>
             <input type="file" id="import-func-input" accept=".xlsx,.xls" style="display:none" onchange="importarFuncionariosExcel(event)">
             <button class="btn bp bsm" onclick="openFuncModal()">+ Novo Funcionário</button>
@@ -810,10 +810,14 @@ let ssMovEpi  = null;
 let ssMovFunc = null;
 let ssFicha   = null;
 let ssLoanFF  = null;
+let ssEstCat  = null;
+let ssFuncDf  = null;
 
 function initSearchableSelects() {
   // Modal movimentação — EPI
-  if(document.getElementById('mov-epi-sel') && !ssMovEpi) {
+  // Re-init if element exists as native select (not yet replaced)
+  const epiEl = document.getElementById('mov-epi-sel');
+  if(epiEl && (epiEl.tagName === 'SELECT' || !ssMovEpi)) {
     ssMovEpi = new SearchableSelect('mov-epi-sel', {
       placeholder: 'Selecione o EPI...',
       searchPlaceholder: 'Buscar EPI...',
@@ -822,7 +826,8 @@ function initSearchableSelects() {
   }
 
   // Modal movimentação — Funcionário
-  if(document.getElementById('mov-func-sel') && !ssMovFunc) {
+  const funcEl = document.getElementById('mov-func-sel');
+  if(funcEl && (funcEl.tagName === 'SELECT' || !ssMovFunc)) {
     ssMovFunc = new SearchableSelect('mov-func-sel', {
       placeholder: 'Não Aplicável',
       searchPlaceholder: 'Buscar funcionário...',
@@ -830,7 +835,8 @@ function initSearchableSelects() {
   }
 
   // Ficha de EPI — funcionário
-  if(document.getElementById('ficha-sel') && !ssFicha) {
+  const fichaEl = document.getElementById('ficha-sel');
+  if(fichaEl && (fichaEl.tagName === 'SELECT' || !ssFicha)) {
     ssFicha = new SearchableSelect('ficha-sel', {
       placeholder: 'Selecione o funcionário...',
       searchPlaceholder: 'Buscar funcionário...',
@@ -839,11 +845,32 @@ function initSearchableSelects() {
   }
 
   // Empréstimos — filtro funcionário
-  if(document.getElementById('loan-ff') && !ssLoanFF) {
+  const loanEl = document.getElementById('loan-ff');
+  if(loanEl && (loanEl.tagName === 'SELECT' || !ssLoanFF)) {
     ssLoanFF = new SearchableSelect('loan-ff', {
       placeholder: 'Todos os funcionários',
       searchPlaceholder: 'Buscar funcionário...',
       onChange: () => renderLoans()
+    });
+  }
+
+  // Estoque — filtro tipo CA
+  const estCatEl = document.getElementById('est-cat');
+  if(estCatEl && (estCatEl.tagName === 'SELECT' || !ssEstCat)) {
+    ssEstCat = new SearchableSelect('est-cat', {
+      placeholder: 'Todos os tipos CA',
+      searchPlaceholder: 'Buscar tipo CA...',
+      onChange: () => { estP=1; renderEst(); }
+    });
+  }
+
+  // Funcionários — filtro departamento
+  const funcDfEl = document.getElementById('func-df');
+  if(funcDfEl && (funcDfEl.tagName === 'SELECT' || !ssFuncDf)) {
+    ssFuncDf = new SearchableSelect('func-df', {
+      placeholder: 'Todos os departamentos',
+      searchPlaceholder: 'Buscar departamento...',
+      onChange: () => { funcP=1; renderFuncs(); }
     });
   }
 }
@@ -1140,6 +1167,8 @@ function goPage(pg, el) {
   document.getElementById('pg-title').textContent = t;
   document.getElementById('pg-sub').textContent   = s;
   pgs[pg] = pgs[pg] || 1;
+  // Initialize searchable selects on page visit
+  initSearchableSelects();
   ({dashboard:renderDash,estoque:renderEst,funcionarios:renderFuncs,movimentacoes:renderMovs,emprestimos:renderLoans,ficha:setupFicha,aquisicao:renderAq})[pg]?.();
 }
 
@@ -1274,15 +1303,16 @@ function renderEst() {
   recalcTodos();
   const q   = (document.getElementById('est-q')?.value||'').toLowerCase();
   const sit = document.getElementById('est-sit')?.value||'';
-  const cat = document.getElementById('est-cat')?.value||'';
 
-  // populate CA type filter once
-  const cs = document.getElementById('est-cat');
-  if(cs && cs.children.length<=1) {
-    [...new Set(EPIS.map(e=>e.ca_tipo).filter(Boolean))].sort().forEach(t=>{
-      const o=document.createElement('option'); o.value=t; o.textContent=t; cs.appendChild(o);
-    });
+  // Popula ssEstCat com tipos CA disponíveis
+  if(ssEstCat) {
+    const caTypes = [...new Set(EPIS.map(e=>e.ca_tipo).filter(Boolean))].sort();
+    ssEstCat.setOptions([
+      { value:'', label:'Todos os tipos CA' },
+      ...caTypes.map(t => ({ value:t, label:t }))
+    ]);
   }
+  const cat = ssEstCat ? ssEstCat.getValue() : (document.getElementById('est-cat')?.value||'');
 
   let f = EPIS.filter(e=>{
     const mq = !q || e.nome.toLowerCase().includes(q) || String(e.ca).includes(q) || (e.ca_tipo||'').toLowerCase().includes(q);
@@ -1434,14 +1464,18 @@ function delEpi(id) {
 let funcP=1;
 function goFuncP(p){ funcP=p; renderFuncs(); }
 function renderFuncs() {
-  const q    = (document.getElementById('func-q')?.value||'').toLowerCase();
-  const dept = document.getElementById('func-df')?.value||'';
-  const ds   = document.getElementById('func-df');
-  if(ds && ds.children.length<=1) {
-    [...new Set(FUNCS.map(f=>f.dept))].sort().forEach(d=>{
-      const o=document.createElement('option'); o.value=d; o.textContent=d; ds.appendChild(o);
-    });
+  const q = (document.getElementById('func-q')?.value||'').toLowerCase();
+
+  // Popula ssFuncDf com departamentos disponíveis
+  if(ssFuncDf) {
+    const depts = [...new Set(FUNCS.map(f=>f.dept).filter(Boolean))].sort();
+    ssFuncDf.setOptions([
+      { value:'', label:'Todos os departamentos' },
+      ...depts.map(d => ({ value:d, label:d }))
+    ]);
   }
+  const dept = ssFuncDf ? ssFuncDf.getValue() : (document.getElementById('func-df')?.value||'');
+
   let f = FUNCS.filter(x=>{
     const mq = !q || x.nome.toLowerCase().includes(q) || String(x.matricula).includes(q) || (x.cargo||'').toLowerCase().includes(q) || (x.dept||'').toLowerCase().includes(q);
     const md = !dept || x.dept===dept;
@@ -1937,21 +1971,26 @@ const TIPO_DESC = {'AQU+':'(+) Aquisição','DEV+':'(+) Devolução','AJU+':'(+)
 function openMov(io) {
   document.getElementById('mov-tipo-sel').value = io==='Entrada' ? 'AQU+' : 'RET-';
 
-  // Inicializa searchable selects se ainda não existirem
+  // Inicializa (ou re-inicializa se ainda for select nativo)
   initSearchableSelects();
 
-  // Popula EPI
-  ssMovEpi.setOptions([
-    ...EPIS.map(e => ({ value: String(e.id), label: e.nome + ' (Físico: ' + Math.round(e.atual) + ')' }))
-  ]);
-  ssMovEpi.reset('Selecione o EPI...');
+  // Popula EPI — sempre atualiza para refletir estoques atuais
+  if(ssMovEpi) {
+    ssMovEpi.setOptions(
+      EPIS.map(e => ({ value: String(e.id), label: e.nome + ' (Físico: ' + Math.round(e.atual) + ')' }))
+    );
+    ssMovEpi.reset('Selecione o EPI...');
+  }
 
   // Popula Funcionário
-  ssMovFunc.setOptions([
-    { value: '', label: 'Não Aplicável' },
-    ...FUNCS.map(f => ({ value: String(f.matricula), label: f.nome + ' — ' + f.matricula }))
-  ]);
-  ssMovFunc.reset('Não Aplicável');
+  if(ssMovFunc) {
+    ssMovFunc.setOptions([
+      { value: '', label: 'Não Aplicável' },
+      ...FUNCS.sort((a,b)=>a.nome.localeCompare(b.nome))
+              .map(f => ({ value: String(f.matricula), label: f.nome + ' — ' + f.matricula }))
+    ]);
+    ssMovFunc.reset('Não Aplicável');
+  }
 
   document.getElementById('mov-data').value = new Date().toISOString().slice(0,16);
   document.getElementById('mov-qtd').value  = 1;
