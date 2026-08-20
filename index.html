@@ -2100,7 +2100,13 @@ function confirmarImpressaoFicha() {
   closeM('m-print-confirm');
 
   // Navega para a ficha
-  goPage('ficha', document.querySelector('.ni[onclick*="'ficha'"]'));
+    // Navigate to ficha tab (pass null - goPage handles missing nav element)
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.ni').forEach(n=>n.classList.remove('active'));
+  const fichaPage = document.getElementById('page-ficha');
+  if(fichaPage) fichaPage.classList.add('active');
+  document.getElementById('pg-title').textContent = 'Ficha de EPI';
+  document.getElementById('pg-sub').textContent   = 'Controle individual por funcionário';
 
   // Garante que o SearchableSelect da ficha está inicializado e populado
   setupFicha();
