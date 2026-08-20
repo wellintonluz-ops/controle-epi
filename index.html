@@ -2096,21 +2096,33 @@ let pendingPrintFicha = null;
 function confirmarImpressaoFicha() {
   if(!pendingPrintFicha) { closeM('m-print-confirm'); return; }
   const { matricula, data } = pendingPrintFicha;
+  pendingPrintFicha = null;
   closeM('m-print-confirm');
 
-  goPage('ficha', document.querySelector('.ni[onclick*="\'ficha\'"]'));
+  // Navega para a ficha
+  goPage('ficha', document.querySelector('.ni[onclick*="'ficha'"]'));
+
+  // Garante que o SearchableSelect da ficha está inicializado e populado
   setupFicha();
-  document.getElementById('ficha-sel').value = matricula;
 
-  // Filtra a ficha para mostrar apenas o dia da retirada
+  // Define o funcionário via ssFicha (SearchableSelect) — NÃO via .value do input nativo
+  if(ssFicha) {
+    ssFicha.setValue(String(matricula));
+  }
+
+  // Define o período exato da retirada
   fichaPeriodo = { ini: data, fim: data };
-  document.getElementById('ficha-data-ini').value = data;
-  document.getElementById('ficha-data-fim').value = data;
+  const ini = document.getElementById('ficha-data-ini');
+  const fim = document.getElementById('ficha-data-fim');
+  if(ini) ini.value = data;
+  if(fim) fim.value = data;
   document.querySelectorAll('#ficha-pills .pill').forEach(p=>p.classList.remove('active'));
-  renderFicha();
 
-  // Pequeno atraso para garantir que o conteúdo renderizou antes de chamar a impressão
-  setTimeout(()=>window.print(), 250);
+  // Renderiza e imprime — aguarda um tick para o DOM atualizar
+  setTimeout(() => {
+    renderFicha();
+    setTimeout(() => window.print(), 400);
+  }, 100);
 }
 
 
